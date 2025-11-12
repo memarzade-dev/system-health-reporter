@@ -29,7 +29,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from html import escape  # Added for HTML sanitization
 from typing import Dict, Any, List, Tuple, Optional
 
@@ -37,74 +37,38 @@ from typing import Dict, Any, List, Tuple, Optional
 # CONSTANTS
 # =============================================================================
 
-VERSION = "1.0.1"  # Bumped for production release
+VERSION = "1.0.2"  # Hardened release
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "system_health_reports")
-REQUIRED_PACKAGES = ["psutil==6.1.0"]  # Pinned for reproducibility
-if platform.system() == "Windows":
-    REQUIRED_PACKAGES.append("wmi==1.5.1")  # Pinned
+ 
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# DEPENDENCY INSTALLER
+# STRICT DEPENDENCY IMPORTS (no runtime auto-install)
 # =============================================================================
 
-def ensure_dependencies(packages: List[str], auto_install: bool = False) -> bool:
-    """Check and optionally install required Python packages."""
-    missing = []
-    for pkg in packages:
-        try:
-            __import__(pkg.split("==")[0])  # Handle pinned versions
-        except ImportError:
-            missing.append(pkg)
-    
-    if not missing:
-        return True
-    
-    logger.info(f"Missing packages: {', '.join(missing)}")
-    if not auto_install:
-        logger.warning("Auto-install disabled. Please install manually: pip install " + " ".join(missing))
-        return False
-    
-    confirm = input("[Installer] Attempt to install via pip? (y/n): ").strip().lower()
-    if confirm != 'y':
-        logger.info("Installation aborted by user.")
-        return False
-    
-    py_exec = sys.executable
-    for pkg in missing:
-        try:
-            subprocess.check_call(
-                [py_exec, "-m", "pip", "install", pkg],  # Removed --upgrade --quiet to allow user feedback
-                stdout=sys.stdout,  # Redirect to console for visibility
-                stderr=sys.stderr
-            )
-            logger.info(f"✓ {pkg} installed successfully")
-        except Exception as e:
-            logger.error(f"✗ Failed to install {pkg}: {e}")
-            return False
-    
-    return True
+try:
+    import psutil  # type: ignore
+except ImportError as e:
+    logger.critical("Missing required dependency 'psutil'. Please install: pip install psutil==6.1.0")
+    raise
 
-# Safe imports after potential installation
-psutil: Optional[Any] = None
-wmi: Optional[Any] = None
+if platform.system().lower() == "windows":
+    try:
+        import wmi  # type: ignore
+    except ImportError:
+        wmi = None
+else:
+    wmi = None
 
 # =============================================================================
 # UTILITIES
 # =============================================================================
 
-def run_command(cmd: List[str], timeout: int = 10, shell: bool = False) -> Tuple[int, str, str]:  # Reduced default timeout
-    """Execute a command safely and return (returncode, stdout, stderr)."""
-    if shell:
-        logger.warning("Shell mode enabled for command; potential security risk if inputs unvalidated.")
-        cmd_str = " ".join(cmd)
-        if any(c in cmd_str for c in [";", "|", "&", "`", "$"]):  # Basic injection check
-            raise ValueError("Potential shell injection detected in command.")
-        cmd = cmd_str
-    
+def run_command(cmd: List[str], timeout: int = 10) -> Tuple[int, str, str]:  # Secure execution
+    """Execute a command securely (no shell) and return (rc, stdout, stderr)."""
     try:
         proc = subprocess.run(
             cmd,
@@ -112,12 +76,10 @@ def run_command(cmd: List[str], timeout: int = 10, shell: bool = False) -> Tuple
             stderr=subprocess.PIPE,
             timeout=timeout,
             text=True,
-            shell=shell,
-            check=True  # Raise on non-zero exit
+            shell=False,
+            check=False
         )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-    except subprocess.CalledProcessError as e:
-        return e.returncode, e.stdout.strip(), e.stderr.strip()
     except subprocess.TimeoutExpired:
         return 124, "", f"Command timed out after {timeout}s"
     except Exception as e:
@@ -188,7 +150,7 @@ class SystemCollector:
         """Collect metadata about the report."""
         self.data["metadata"] = {
             "report_version": VERSION,
-            "timestamp_utc": datetime.utcnow().isoformat(timespec='seconds') + "Z",  # Simplified
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
             "timestamp_local": datetime.now().isoformat(timespec='seconds'),
             "hostname": socket.gethostname(),
             "fqdn": safe_get(socket.getfqdn, "unknown"),
@@ -235,7 +197,7 @@ class SystemCollector:
             "machine": platform.machine(),
             "physical_cores": psutil.cpu_count(logical=False),
             "logical_cores": psutil.cpu_count(logical=True),
-            "usage_percent": psutil.cpu_percent(interval=0.5)  # Reduced interval for speed
+            "usage_percent": psutil.cpu_percent(interval=None)  # No artificial delay
         }
         
         freq = safe_get(psutil.cpu_freq)
@@ -1169,33 +1131,18 @@ def main():
     print(f"  Author: memarzade-dev")
     print(f"{'='*70}\n")
     
-    # Parse arguments with validation
-    output_dir = DEFAULT_OUTPUT_DIR
-    auto_install = False
+    # Parse arguments with validation (no runtime installer)
+    env_output = os.environ.get("OUTPUT_DIR")
+    output_dir = env_output if env_output else DEFAULT_OUTPUT_DIR
     if len(sys.argv) > 1:
-        for arg in sys.argv[1:]:
-            if arg == "--auto-install":
-                auto_install = True
-            elif os.path.isdir(arg) or os.access(os.path.dirname(arg), os.W_OK):
-                output_dir = arg
-            else:
-                logger.error(f"Invalid argument: {arg}")
-                sys.exit(1)
-    
-    if not ensure_dependencies(REQUIRED_PACKAGES, auto_install):
-        logger.error("Failed to ensure dependencies. Exiting.")
-        sys.exit(1)
-    
-    global psutil, wmi  # Load after ensure
-    try:
-        import psutil
-    except ImportError:
-        psutil = None
-    if platform.system() == "Windows":
-        try:
-            import wmi
-        except ImportError:
-            wmi = None
+        arg = sys.argv[1]
+        candidate = os.path.expanduser(arg)
+        base_dir = os.path.dirname(candidate) or "."
+        if os.path.isdir(candidate) or os.access(base_dir, os.W_OK):
+            output_dir = candidate
+        else:
+            logger.error(f"Invalid argument: {arg}")
+            sys.exit(1)
     
     print(f"[1/3] Collecting system information...")
     collector = SystemCollector()

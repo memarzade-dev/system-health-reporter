@@ -1,6 +1,6 @@
 # System Health Reporter
 
-[![Python Version](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/memarzade-dev)
 
@@ -9,7 +9,7 @@ A comprehensive, production-grade system monitoring and reporting tool that gene
 ## ✨ Features
 
 - **🔄 Cross-Platform**: Works seamlessly on Windows, macOS, and Linux
-- **📦 Auto-Installation**: Automatically installs required dependencies (psutil, wmi)
+- **📦 Standard Installation**: Dependencies installed via pip (no auto-install at runtime)
 - **📊 Comprehensive Data Collection**:
   - Hardware specifications (CPU, Memory, GPU, Disk)
   - Operating system details and kernel information
@@ -27,7 +27,7 @@ A comprehensive, production-grade system monitoring and reporting tool that gene
 ## 📋 Requirements
 
 - **Python**: 3.7 or higher
-- **Dependencies**: Auto-installed on first run
+- **Dependencies**: Install with pip
   - `psutil` (cross-platform system utilities)
   - `wmi` (Windows only - for WMI queries)
 
@@ -40,21 +40,24 @@ A comprehensive, production-grade system monitoring and reporting tool that gene
 git clone https://github.com/memarzade-dev/system-health-reporter.git
 cd system-health-reporter
 
-# Run the script (dependencies will auto-install)
-python system_health_reporter.py
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the script
+python sys_health_reporter.py
 ```
 
 ### Basic Usage
 
 ```bash
 # Generate reports in default directory (~/system_health_reports)
-python system_health_reporter.py
+python sys_health_reporter.py
 
 # Specify custom output directory
-python system_health_reporter.py /path/to/output/directory
+python sys_health_reporter.py /path/to/output/directory
 
 # On Windows
-python system_health_reporter.py C:\Reports\SystemHealth
+python sys_health_reporter.py C:\Reports\SystemHealth
 ```
 
 ## 📖 Usage Examples
@@ -230,7 +233,7 @@ Edit the script to adjust timeout values for slow systems:
 
 ```python
 # In system_health_reporter.py, modify:
-def run_command(cmd: List[str], timeout: int = 30, shell: bool = False):
+def run_command(cmd: List[str], timeout: int = 30):
     # Change timeout to 60 seconds for slow commands
     timeout = 60
 ```
